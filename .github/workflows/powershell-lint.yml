@@ -23,5 +23,12 @@ jobs:
         shell: pwsh
         run: |
           Import-Module PSScriptAnalyzer
-          Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
+          $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Settings ./PSScriptAnalyzerSettings.psd1
+          if ($results) {
+            $results | Format-Table -AutoSize | Out-String | Write-Output
+            Write-Error "PSScriptAnalyzer found $($results.Count) issue(s)."
+            exit 1
+          } else {
+            Write-Output "PSScriptAnalyzer: no issues found."
+          }
 

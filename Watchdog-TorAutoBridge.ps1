@@ -47,9 +47,13 @@ function Write-Log {
     Add-Content -Path $LogFile -Value $line
 }
 
-function Load-State {
+function Get-AutoBridgeState {
     if (Test-Path $StateFile) {
-        try { return (Get-Content $StateFile -Raw | ConvertFrom-Json) } catch { }
+        try {
+            return (Get-Content $StateFile -Raw | ConvertFrom-Json)
+        } catch {
+            Write-Log "State file unreadable ($($_.Exception.Message)) - falling back to default state."
+        }
     }
     return [PSCustomObject]@{
         TorPid          = 0
@@ -77,7 +81,7 @@ if (-not $torProc) {
     exit 0
 }
 
-$state = Load-State
+$state = Get-AutoBridgeState
 
 # Detect a fresh tor.exe instance (service restarted since our last check,
 # whether we did it or something else did) - reset the tracked log offset
