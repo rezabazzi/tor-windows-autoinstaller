@@ -1,9 +1,9 @@
 name: PSScriptAnalyzer
 on:
   pull_request:
-    branches: [""**""]
+    branches: ["**"]
   push:
-    branches: [""main""]
+    branches: ["main"]
 
 jobs:
   lint:
@@ -18,10 +18,11 @@ jobs:
       - name: Install PSScriptAnalyzer
         shell: pwsh
         run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction SilentlyContinue
           Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck -AllowClobber
 
       - name: Run PSScriptAnalyzer
         shell: pwsh
         run: |
           Import-Module PSScriptAnalyzer
-          Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
+          Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning
