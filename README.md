@@ -4,7 +4,7 @@ A zero-touch Windows installer that turns Tor into a **permanent, self-healing b
 
 Built for environments where a machine needs a working Tor SOCKS proxy at all times (e.g. behind aggressive DPI/censorship) but the person using it isn't expected to be technical, and the machine may have nothing pre-installed.
 
-> Repo: [github.com/rezabazzi](https://github.com/rezabazzi) — rename this repo to whatever you like (`tor-windows-autoinstaller` suggested).
+> Repo: [github.com/rezabazzi](https://github.com/rezabazzi) 
 
 ---
 
