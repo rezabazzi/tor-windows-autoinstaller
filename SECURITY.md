@@ -1,6 +1,8 @@
 # Security Policy
 
-If you believe you've found a security vulnerability in this project, please report it privately by emailing security@example.com (PGP key: https://example.com/pgp-key) or by opening a GitHub Security Advisory for this repository. Do not post exploit details publicly until the issue has been addressed.
+If you believe you've found a security vulnerability in this project, please report it privately by opening a GitHub Security Advisory for this repository. Do not post exploit details publicly until the issue has been addressed.
+
+If you prefer to provide a contact email for private disclosure, please open a Security Advisory and include contact details there.
 
 Please include:
 - A clear description of the vulnerability and steps to reproduce it.
