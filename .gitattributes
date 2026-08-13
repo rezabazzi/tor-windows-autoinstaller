@@ -1,0 +1,6 @@
+# Normalize line endings and treat text files properly
+* text=auto
+*.ps1 text eol=lf
+*.iss  text eol=lf
+*.md   text eol=lf
+LICENSE text eol=lf

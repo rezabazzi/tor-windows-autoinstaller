@@ -5,3 +5,10 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+
+# If you later add PowerShell modules or other ecosystems, add them here:
+- package-ecosystem: "nuget"
+  directory: "/"
+  schedule:
+    interval: "weekly"
+  open-pull-requests-limit: 5
