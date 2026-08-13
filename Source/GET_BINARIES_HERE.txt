@@ -1,0 +1,9 @@
+Two more files belong directly in this Source\ folder (not subfolders):
+
+1. tor.exe
+   https://www.torproject.org/download/tor/  (Windows Expert Bundle, 64-bit)
+
+2. nssm.exe
+   https://nssm.cc/download  (win64 build)
+
+Place both directly in Source\, then delete this text file.

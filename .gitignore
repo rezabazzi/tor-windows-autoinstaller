@@ -1,0 +1,46 @@
+# ==== Inno Setup build output ====
+Output/
+*.exe
+!Source/tor.exe
+!Source/nssm.exe
+!Source/PluggableTransports/lyrebird.exe
+*.iss.bak
+Setup-*.exe
+
+# ==== Third-party binaries (fetch/vendor separately, don't commit) ====
+# Comment these out if you intentionally vendor the binaries in Source\
+# Source/tor.exe
+# Source/nssm.exe
+# Source/PluggableTransports/lyrebird.exe
+# Source/*.dll
+
+# ==== Runtime data (created on the target machine, not part of the repo) ====
+logs/
+data/
+*.log
+bridges.d/*.conf
+!bridges.d/*.conf.sample
+bridges.d/.autobridge-state.json
+
+# ==== Secrets / local overrides ====
+*.local.torrc
+*bridges-private*
+.env
+
+# ==== Editor / OS junk ====
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+*.tmp
+*.bak
+*~
+
+# ==== PowerShell ====
+*.ps1.log
+
+# ==== Windows Installer scratch files ====
+*.dat
+*.msi
+*.wixobj
+*.wixpdb
