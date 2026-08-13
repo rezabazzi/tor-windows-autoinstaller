@@ -1,11 +1,10 @@
 # Security Policy
 
-If you believe you've found a security vulnerability in this project, please report it by opening an issue in this repository and clearly marking it as a security report. If you prefer private disclosure, include contact information in the issue body and mark the issue as private.
+If you believe you've found a security vulnerability in this project, please report it privately by emailing security@example.com (PGP key: https://example.com/pgp-key) or by opening a GitHub Security Advisory for this repository. Do not post exploit details publicly until the issue has been addressed.
 
-Guidelines:
+Please include:
+- A clear description of the vulnerability and steps to reproduce it.
+- Affected versions and environment details.
+- Any proof-of-concept or exploit details (please send privately).
 
-- Provide a clear description of the vulnerability and the steps to reproduce it.
-- Include the versions and environment details where the issue was observed.
-- Do not post exploit details publicly until the issue has been addressed.
-
-We will respond to security reports as soon as possible.
+We aim to respond within 3 business days. After we fix the issue we will coordinate disclosure and, if appropriate, request a CVE.
