@@ -1,12 +1,18 @@
 # Security Policy
 
-If you believe you've found a security vulnerability in this project, please report it privately by opening a GitHub Security Advisory for this repository. Do not post exploit details publicly until the issue has been addressed.
+If you believe you've found a security vulnerability in this project, please report it privately. We prefer security reports to be submitted via GitHub Security Advisories for this repository.
 
-If you prefer to provide a contact email for private disclosure, please open a Security Advisory and include contact details there.
+If you are not able to open a Security Advisory, you may open an issue and mark it as a security report, but do NOT post exploit details publicly. If you prefer private disclosure by email, open a Security Advisory and include contact details there.
 
-Please include:
-- A clear description of the vulnerability and steps to reproduce it.
-- Affected versions and environment details.
-- Any proof-of-concept or exploit details (please send privately).
+Guidelines for reporting:
 
-We aim to respond within 3 business days. After we fix the issue we will coordinate disclosure and, if appropriate, request a CVE.
+- Provide a clear description of the vulnerability and steps to reproduce it.
+- Include affected versions, configuration, and environment details.
+- If you have a proof-of-concept, include it in private only (Security Advisory or encrypted email).
+
+Response & disclosure:
+
+- We aim to acknowledge reports within 3 business days.
+- After we confirm and fix the issue we will coordinate disclosure and, if appropriate, request a CVE.
+
+Thank you for helping us keep the project secure.
