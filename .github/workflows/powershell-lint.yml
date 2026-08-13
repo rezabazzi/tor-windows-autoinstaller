@@ -24,8 +24,13 @@ jobs:
         run: |
           Import-Module PSScriptAnalyzer
           $results = Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Settings ./PSScriptAnalyzerSettings.psd1
+          $root = (Get-Location).Path
+          foreach ($r in $results) {
+            $level = if ($r.Severity -eq 'Error') { 'error' } else { 'warning' }
+            $rel = $r.ScriptPath.Substring($root.Length + 1) -replace '\\','/'
+            Write-Output "::$level file=$rel,line=$($r.Line)::$($r.RuleName): $($r.Message)"
+          }
           if ($results) {
-            $results | Format-Table -AutoSize | Out-String | Write-Output
             Write-Error "PSScriptAnalyzer found $($results.Count) issue(s)."
             exit 1
           } else {
