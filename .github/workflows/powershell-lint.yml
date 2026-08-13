@@ -1,0 +1,27 @@
+name: PSScriptAnalyzer
+on:
+  pull_request:
+    branches: [""**""]
+  push:
+    branches: [""main""]
+
+jobs:
+  lint:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup PowerShell
+        uses: actions/setup-powershell@v2
+
+      - name: Install PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser -SkipPublisherCheck -AllowClobber
+
+      - name: Run PSScriptAnalyzer
+        shell: pwsh
+        run: |
+          Import-Module PSScriptAnalyzer
+          Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error
