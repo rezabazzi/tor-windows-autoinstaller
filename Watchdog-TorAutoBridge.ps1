@@ -41,7 +41,7 @@ $FailThreshold = 3
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 if (-not (Test-Path $BridgesDir)) { New-Item -ItemType Directory -Path $BridgesDir -Force | Out-Null }
 
-function Write-Log {
+function Write-WatchdogLog {
     param([string]$Message)
     $line = "[{0}] {1}" -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $Message
     Add-Content -Path $LogFile -Value $line
@@ -52,7 +52,7 @@ function Get-AutoBridgeState {
         try {
             return (Get-Content $StateFile -Raw | ConvertFrom-Json)
         } catch {
-            Write-Log "State file unreadable ($($_.Exception.Message)) - falling back to default state."
+            Write-WatchdogLog "State file unreadable ($($_.Exception.Message)) - falling back to default state."
         }
     }
     return [PSCustomObject]@{
@@ -76,8 +76,8 @@ function Get-ActiveBridgeConfCount {
 
 $torProc = Get-Process -Name 'tor' -ErrorAction SilentlyContinue
 if (-not $torProc) {
-    Write-Log "tor.exe not running - attempting 'nssm start $SvcName' and exiting this cycle."
-    try { & $Nssm start $SvcName *>> $LogFile } catch { Write-Log "nssm start failed: $($_.Exception.Message)" }
+    Write-WatchdogLog "tor.exe not running - attempting 'nssm start $SvcName' and exiting this cycle."
+    try { & $Nssm start $SvcName *>> $LogFile } catch { Write-WatchdogLog "nssm start failed: $($_.Exception.Message)" }
     exit 0
 }
 
@@ -96,7 +96,7 @@ if ($state.TorPid -ne $torProc.Id -or $state.TorStartTime -ne $currentStartTime)
     $state.Offset       = $offset
     $state.FailCount    = 0
     $state.BridgesEnabled = (Get-ActiveBridgeConfCount) -gt 0
-    Write-Log "New tor.exe instance detected (PID $($torProc.Id)) - watching from log offset $offset. Bridges currently $(if ($state.BridgesEnabled) {'ON'} else {'OFF'})."
+    Write-WatchdogLog "New tor.exe instance detected (PID $($torProc.Id)) - watching from log offset $offset. Bridges currently $(if ($state.BridgesEnabled) {'ON'} else {'OFF'})."
 }
 
 # ---- Health check: did "Bootstrapped 100%" appear since our tracked offset? ----
@@ -117,14 +117,14 @@ if (Test-Path $NoticeLog) {
 }
 
 if ($healthy) {
-    Write-Log "Healthy: Bootstrapped 100% seen for PID $($torProc.Id)."
+    Write-WatchdogLog "Healthy: Bootstrapped 100% seen for PID $($torProc.Id)."
     $state.FailCount = 0
     Save-State $state
     exit 0
 }
 
 $state.FailCount++
-Write-Log "Not yet bootstrapped (check $($state.FailCount)/$FailThreshold for PID $($torProc.Id))."
+Write-WatchdogLog "Not yet bootstrapped (check $($state.FailCount)/$FailThreshold for PID $($torProc.Id))."
 
 if ($state.FailCount -lt $FailThreshold) {
     Save-State $state
@@ -136,9 +136,9 @@ if (-not $state.BridgesEnabled) {
     $sample = Get-ChildItem -Path $BridgesDir -Filter '*.conf.sample' -File -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($sample) {
         $target = Join-Path $BridgesDir ($sample.BaseName)   # strips ".sample"
-        Write-Log "Direct connection stuck for ~$($FailThreshold * 5) min. Auto-activating bridges: $($sample.Name) -> $(Split-Path -Leaf $target)"
+        Write-WatchdogLog "Direct connection stuck for ~$($FailThreshold * 5) min. Auto-activating bridges: $($sample.Name) -> $(Split-Path -Leaf $target)"
         Copy-Item -Path $sample.FullName -Destination $target -Force
-        try { & $Nssm restart $SvcName *>> $LogFile } catch { Write-Log "nssm restart failed: $($_.Exception.Message)" }
+        try { & $Nssm restart $SvcName *>> $LogFile } catch { Write-WatchdogLog "nssm restart failed: $($_.Exception.Message)" }
 
         # Reset tracking for the instance that's about to come up.
         Start-Sleep -Seconds 2
@@ -149,12 +149,12 @@ if (-not $state.BridgesEnabled) {
         $state.TorStartTime   = $null
         Save-State $state
     } else {
-        Write-Log "Direct connection stuck for ~$($FailThreshold * 5) min, but no bridges.d\*.conf.sample available to auto-activate. Nothing more this watchdog can do automatically - drop a bridge conf into $BridgesDir manually."
+        Write-WatchdogLog "Direct connection stuck for ~$($FailThreshold * 5) min, but no bridges.d\*.conf.sample available to auto-activate. Nothing more this watchdog can do automatically - drop a bridge conf into $BridgesDir manually."
         Save-State $state
     }
 } else {
     if (-not $state.AlertedStale) {
-        Write-Log "ALERT: bridges are enabled but still stuck ~$($FailThreshold * 5) min after activation. These bridges are likely dead or also blocked. Not restarting again automatically to avoid a restart loop - get fresh bridge lines (https://bridges.torproject.org/) into $BridgesDir and either replace the active .conf or restart the service by hand once you have new ones."
+        Write-WatchdogLog "ALERT: bridges are enabled but still stuck ~$($FailThreshold * 5) min after activation. These bridges are likely dead or also blocked. Not restarting again automatically to avoid a restart loop - get fresh bridge lines (https://bridges.torproject.org/) into $BridgesDir and either replace the active .conf or restart the service by hand once you have new ones."
         $state.AlertedStale = $true
     }
     Save-State $state
