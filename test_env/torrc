@@ -1,0 +1,54 @@
+## torrc — TorService (auto-installed via NSSM)
+## Tor SOCKS Proxy v2.0 with Snowflake support
+
+# --- Data / logging (relative paths resolved by NSSM AppDirectory) ---
+DataDirectory data
+Log notice file logs/tor-notice.log
+
+# GeoIP files are OPTIONAL — only needed for country-based node filtering
+# (ExcludeNodes/ExcludeExitNodes). Uncomment these two lines only if you
+# copied geoip/geoip6 into the install directory (from the Expert Bundle's
+# Data\Tor folder).
+#GeoIPFile geoip
+#GeoIPv6File geoip6
+
+# --- SOCKS proxy ---
+# Loopback-only by default. SocksPort is bound to 127.0.0.1, which means
+# EVERY connecting client's address is seen by Tor as 127.0.0.1 - so
+# 127.0.0.1 must be explicitly accepted, or nothing can ever connect.
+#
+# To share on LAN instead, change SocksPort to 0.0.0.0:9050 - only then
+# will real 192.168.x.x client addresses show up and the second accept
+# line below becomes meaningful.
+SocksPort 127.0.0.1:9050
+SocksPolicy accept 127.0.0.1/32
+SocksPolicy accept 192.168.0.0/16
+SocksPolicy reject *
+
+# --- Control port (local-only, for WebSocket API) ---
+# ControlSocket runs on a named pipe for local process communication.
+# The WebSocket API server connects to this for Tor status and commands.
+ControlPort 127.0.0.1:9051
+CookieAuthentication 1
+CookieAuthFilePortReadable 1
+
+# --- Bridges (OPTIONAL, off by default) ---
+# A plain SOCKS proxy doesn't need bridges unless this machine's direct Tor
+# connections are being blocked (e.g. Iran's DPI). Bridges are NOT baked
+# into this file anymore - they age out fast and shipping one specific
+# person's bridge lines to every install is neither useful nor something
+# other users need. Instead:
+#
+#   Drop a *.conf file into bridges.d\ containing UseBridges 1,
+#   ClientTransportPlugin ..., and your own Bridge lines, then
+#   `nssm restart TorService`. Tor picks it up automatically via the
+#   %include below - no torrc edits needed, and if bridges.d\ is empty
+#   this line is silently a no-op (glob %include with zero matches is not
+#   an error in Tor - a literal missing filename would be).
+#
+# See bridges.d\README.txt for the exact format. Ready-to-use examples
+# ship as bridges.d\*.conf.sample files - rename them (drop the .sample)
+# to activate those specific bridges.
+#
+# Supported transports: obfs4, webtunnel, snowflake
+%include bridges.d/*.conf

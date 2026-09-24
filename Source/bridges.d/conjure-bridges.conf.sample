@@ -1,0 +1,21 @@
+# conjure-bridges.conf.sample
+#
+# Conjure pluggable transport bridges for Tor.
+#
+# Conjure uses phantom IP addresses to circumvent censorship by making
+# connections appear to go to random IP addresses that are not blocked.
+#
+# This is inert as shipped - the ".sample" extension means torrc's
+# %include bridges.d\*.conf glob does NOT pick it up.
+#
+# To activate these exact bridges, rename this file to remove ".sample"
+# (conjure-bridges.conf) and restart the service:
+#
+#     nssm restart TorService
+#
+# Get fresh conjure bridges from https://bridges.torproject.org/
+
+UseBridges 1
+ClientTransportPlugin conjure exec PluggableTransports\conjure-client.exe
+
+Bridge conjure 192.0.2.1:443 0123456789ABCDEF0123456789ABCDEF01234567 url=https://example.com/

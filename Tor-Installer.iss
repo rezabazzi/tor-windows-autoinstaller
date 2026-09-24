@@ -113,6 +113,8 @@ Source: "Source\geoip6"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoes
 ; Pluggable transports (bridges)
 Source: "Source\PluggableTransports\lyrebird.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion
 Source: "Source\PluggableTransports\snowflake-client.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Source\PluggableTransports\meek-client.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Source\PluggableTransports\conjure-client.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; NSSM (service wrapper)
 Source: "Source\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -125,6 +127,8 @@ Source: "Source\torrc"; DestDir: "{app}"; Flags: ignoreversion
 Source: "Source\bridges.d\README.txt"; DestDir: "{app}\bridges.d"; Flags: ignoreversion
 Source: "Source\bridges.d\mordad-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion
 Source: "Source\bridges.d\snowflake-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Source\bridges.d\meek-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion skipifsourcedoesntexist
+Source: "Source\bridges.d\conjure-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Post-install script — does the actual NSSM/firewall/service work (see header)
 Source: "Setup-TorService.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -136,6 +140,12 @@ Source: "Watchdog-TorAutoBridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
 
 ; WebSocket API server (v2.0) — provides real-time monitoring and control
 Source: "TorApiServer.ps1"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; Web dashboard (v2.0) — browser-based monitoring UI
+Source: "WebDashboard.html"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
+
+; Dashboard server (v2.0) — serves the web UI on port 8383
+Source: "DashboardServer.ps1"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Dirs]
 Name: "{app}\data"

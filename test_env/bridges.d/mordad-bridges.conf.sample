@@ -1,0 +1,20 @@
+# mordad-bridges.conf.sample
+#
+# This is inert as shipped - the ".sample" extension means torrc's
+# %include C:\Tor\bridges.d\*.conf glob does NOT pick it up.
+#
+# To activate these exact bridges, rename this file to remove ".sample"
+# (mordad-bridges.conf) and restart the service:
+#
+#     nssm restart TorService
+#
+# These bridges age out - check they still work (tor-notice.log should
+# show "Bootstrapped 100%" within a minute or two of restart) and replace
+# them from https://bridges.torproject.org/ if not.
+
+UseBridges 1
+ClientTransportPlugin webtunnel,obfs4 exec C:\Tor\PluggableTransports\lyrebird.exe
+
+Bridge webtunnel [2001:db8:d995:85ac:4672:ec10:6c7a:bbf0]:443 CE1B42C4F2C5091C8698E3AF2B470208E20DA101 url=https://daddyrock.crunchbit.ch/haterbutfreespeaksitsallowage ver=0.0.4
+Bridge obfs4 135.180.19.229:9561 54061A693BF308D7276BA748FA5E70B4EF19C626 cert=eY5Nxi7VRYUvd7wIGwLteR3TDYVOmC4SQOMQYwfZbLfCXelXiP/2HXowaGHPMRSmfZXMMQ iat-mode=0
+Bridge obfs4 185.177.207.142:8443 244DC22782A75359BFF18FD362BE1AA280ABBA8E cert=nD0Y+fu7tRDjKl0kbY4ZGemXPa320l7jxoC3z+eFJWRc0FCAPBs4d5aMNjV8KNxfc4a7QA iat-mode=0

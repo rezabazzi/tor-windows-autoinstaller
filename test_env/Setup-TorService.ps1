@@ -207,14 +207,13 @@ try {
 # ---- Install and start the WebSocket API server (v2.0) ----
 # The API server provides real-time monitoring and control via WebSocket.
 # It connects to Tor's ControlPort (9051) and exposes status/commands on port 9052.
-$ApiService = Join-Path $AppDir 'TorApiServer.ps1'
 Write-InstallLog "Checking for WebSocket API server..."
 if (Test-Path $ApiService) {
-    Write-InstallLog "TorApiServer.ps1 found - registering as a service..."
+    Write-InstallLog "TorApiServer.exe found - registering as a service..."
     $apiSvcName = 'TorApiService'
     $apiSvc = Get-Service -Name $apiSvcName -ErrorAction SilentlyContinue
     if (-not $apiSvc) {
-        $apiOut = & $Nssm install $apiSvcName 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$ApiService`"" '-appdirectory' $AppDir 2>&1
+        $apiOut = & $Nssm install $apiSvcName $ApiService '-appdirectory' $AppDir 2>&1
         $apiOut | Add-Content -Path $LogFile
         if ($LASTEXITCODE -ne 0) {
             Write-InstallLog "WARNING: TorApiService install failed with code $LASTEXITCODE"
@@ -232,35 +231,6 @@ if (Test-Path $ApiService) {
     }
 } else {
     Write-InstallLog "TorApiServer.exe not found - skipping WebSocket API service setup."
-}
-
-# ---- Install and start the Dashboard Server (v2.0) ----
-# The dashboard server serves the web UI on port 8383 for browser monitoring
-$DashboardServer = Join-Path $AppDir 'DashboardServer.ps1'
-$DashboardSvcName = 'TorDashboardService'
-Write-InstallLog "Checking for Dashboard Server..."
-if (Test-Path $DashboardServer) {
-    Write-InstallLog "DashboardServer found - registering as a service..."
-    $dashboardSvc = Get-Service -Name $DashboardSvcName -ErrorAction SilentlyContinue
-    if (-not $dashboardSvc) {
-        $dashboardOut = & $Nssm install $DashboardSvcName 'powershell.exe' "-NoProfile -ExecutionPolicy Bypass -File `"$DashboardServer`"" '-appdirectory' $AppDir 2>&1
-        $dashboardOut | Add-Content -Path $LogFile
-        if ($LASTEXITCODE -ne 0) {
-            Write-InstallLog "WARNING: DashboardService install failed with code $LASTEXITCODE"
-        } else {
-            & $Nssm set $DashboardSvcName DisplayName 'Tor Dashboard Service' *>> $LogFile
-            & $Nssm set $DashboardSvcName Description 'Tor web dashboard server (port 8383)' *>> $LogFile
-            & $Nssm set $DashboardSvcName Start SERVICE_AUTO_START *>> $LogFile
-            & $Nssm set $DashboardSvcName AppStdout (Join-Path $LogDir 'tor-dashboard-stdout.log') *>> $LogFile
-            & $Nssm set $DashboardSvcName AppStderr (Join-Path $LogDir 'tor-dashboard-stderr.log') *>> $LogFile
-            & $Nssm set $DashboardSvcName AppExit Default Restart *>> $LogFile
-            Write-InstallLog "TorDashboardService registered via NSSM."
-        }
-    } else {
-        Write-InstallLog "TorDashboardService already exists."
-    }
-} else {
-    Write-InstallLog "DashboardServer.ps1 not found - skipping dashboard setup."
 }
 
 # ---- Start the services ----

@@ -14,72 +14,62 @@ Thanks for your interest in contributing! This file describes the typical workfl
 
 - Keep changes focused and use clear commit messages. Prefer small, reviewable commits.
 
-## Linting and Static Analysis
-We use PSScriptAnalyzer for PowerShell files. Run it locally before opening a PR, using the repo's settings file so your results match CI:
-```powershell
-Install-Module -Name PSScriptAnalyzer -Scope CurrentUser
-Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Settings ./PSScriptAnalyzerSettings.psd1
-```
-
-The repository includes a GitHub Actions workflow that runs this exact command on every PR and push to main, and fails the check if anything is found - it isn't just informational.
-
-## Lint Rule Exceptions
-Three default PSScriptAnalyzer rules are deliberately excluded via `PSScriptAnalyzerSettings.psd1`, not by accident:
-
-1. `PSAvoidUsingWriteHost` — this project's scripts are run interactively by an admin (the installer even pauses for a keypress when run standalone outside the installer's silent flow). Write-Host is the right tool for that; the rule exists to protect module code meant to be composed in a pipeline, which doesn't apply here.
-
-2. `PSUseShouldProcessForStateChangingFunctions` — flags the watchdog's private `Save-State` helper for its verb. It's an internal implementation detail that persists the watchdog's own tracking file, not a public cmdlet anyone would expect `-WhatIf`/`-Confirm` support on.
-
-3. `PSUseDeclaredVarsMoreThanAssignments` — the WebSocket API server (TorApiServer.ps1) shares state across functions via script-scoped variables (`$torTcp`, `$torReader`, `$torWriter`, `$torStream`) that are assigned in one function and read in another. This is a legitimate pattern for a long-running service script.
-
-If you think a new exception is warranted, say so explicitly in the PR description rather than adding it silently - the settings file is meant to stay a short, reasoned list.
-
-## Testing and Building
-To build the installer locally you will need Inno Setup (ISCC.exe). Typical steps:
-1. Install Inno Setup from https://jrsoftware.org/
-2. Place required binaries in the Source folder (see Tor-Installer.iss header)
-3. Run `ISCC.exe Tor-Installer.iss` to produce the installer
-
-## Security & Sensitive Data
-- Do NOT commit secrets, credentials, tokens, or private keys to the repository.
-- If you need to share a secret for CI or tests, use repository secrets (Actions) or a secure channel.
-
-## Creating a Pull Request
-- Push your feature branch to your fork and open a pull request targeting this repository.
-- Include:
-  - Short description of change
-  - Motivation and summary of approach
-  - Testing steps or how to verify
-  - Any follow-up tasks
-
-## CI and Merging
-- Wait for PSScriptAnalyzer checks to pass on the PR.
-- Address any review comments and requested changes.
-- When approved and CI is green the PR can be merged by a maintainer.
-
-## Maintainer Tips
-- Use the GitHub web UI or gh CLI:
-  ```bash
-  gh pr checkout <number>
-  gh pr merge <number> --merge | --squash | --rebase
-  ```
-
 ## Project Architecture (v2.0)
 ```
 Tor-Installer.iss          # Inno Setup — packaging
-Setup-TorService.ps1       # Post-install: service setup, firewall, watchdog, API server
+Setup-TorService.ps1       # Post-install: service setup, firewall, watchdog, API server, dashboard
 Watchdog-TorAutoBridge.ps1 # Scheduled task: multi-transport bridge activation
-TorApiServer.ps1           # WebSocket API: real-time monitoring and control (v2.0)
+TorApiServer.ps1           # WebSocket API: real-time monitoring and control
+DashboardServer.ps1        # HTTP server for web dashboard (port 8383)
+WebDashboard.html          # Browser-based monitoring UI
+TorApiClient.ps1           # Example WebSocket client
 PSScriptAnalyzerSettings.psd1
 Source/
   tor.exe, nssm.exe, *.dll
   torrc                    # Config (relative paths, ControlPort, bridges include)
   PluggableTransports/
     lyrebird.exe           # obfs4/webtunnel
-    snowflake-client.exe   # snowflake (v2.0)
+    snowflake-client.exe   # snowflake
+    meek-client.exe        # meek
+    conjure-client.exe     # conjure
   bridges.d/
     mordad-bridges.conf.sample      # obfs4/webtunnel example
-    snowflake-bridges.conf.sample   # snowflake example (v2.0)
+    snowflake-bridges.conf.sample   # snowflake example
+    meek-bridges.conf.sample        # meek example
+    conjure-bridges.conf.sample     # conjure example
 ```
 
-Thanks for contributing — your help improves the project for everyone.
+## Linting and Static Analysis
+We use PSScriptAnalyzer for PowerShell files. Run it locally before opening a PR:
+```powershell
+Install-Module -Name PSScriptAnalyzer -Scope CurrentUser
+Invoke-ScriptAnalyzer -Path . -Recurse -Severity Error,Warning -Settings ./PSScriptAnalyzerSettings.psd1
+```
+
+The repository includes a GitHub Actions workflow that runs this exact command on every PR and push to main.
+
+## Lint Rule Exceptions
+Four default PSScriptAnalyzer rules are deliberately excluded via `PSScriptAnalyzerSettings.psd1`:
+
+1. `PSAvoidUsingWriteHost` — scripts are run interactively by an admin. Write-Host is correct for that.
+2. `PSUseShouldProcessForStateChangingFunctions` — flags the watchdog's private `Save-State` helper. It's internal, not a public cmdlet.
+3. `PSUseDeclaredVarsMoreThanAssignments` — the WebSocket API server shares state across functions via script-scoped variables.
+4. `PSReviewUnusedParameter` — flags `TorControlHost` and `TorControlPort` in `TorApiServer.ps1` which ARE used in nested script blocks but PSScriptAnalyzer can't resolve cross-block usage.
+
+## Testing and Building
+To build the installer locally:
+1. Install Inno Setup from https://jrsoftware.org/
+2. Place required binaries in the Source folder (see Tor-Installer.iss header)
+3. Run `ISCC.exe Tor-Installer.iss` to produce the installer
+
+## Security & Sensitive Data
+- Do NOT commit secrets, credentials, tokens, or private keys to the repository.
+
+## Creating a Pull Request
+- Push your feature branch to your fork and open a pull request.
+- Include: description, motivation, testing steps, follow-up tasks.
+
+## CI and Merging
+- Wait for PSScriptAnalyzer checks to pass.
+- Address review comments.
+- When approved and CI is green, the PR can be merged.

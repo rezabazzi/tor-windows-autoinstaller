@@ -1,0 +1,21 @@
+# meek-bridges.conf.sample
+#
+# Meek pluggable transport bridges for Tor.
+#
+# Meek uses domain fronting to circumvent censorship by making connections
+# appear to go to popular CDN domains (like Azure, Amazon, or Google).
+#
+# This is inert as shipped - the ".sample" extension means torrc's
+# %include bridges.d\*.conf glob does NOT pick it up.
+#
+# To activate these exact bridges, rename this file to remove ".sample"
+# (meek-bridges.conf) and restart the service:
+#
+#     nssm restart TorService
+#
+# Get fresh meek bridges from https://bridges.torproject.org/
+
+UseBridges 1
+ClientTransportPlugin meek_lite exec PluggableTransports\meek-client.exe
+
+Bridge meek_lite 192.0.2.1:443 0123456789ABCDEF0123456789ABCDEF01234567 url=https://meek.azureedge.net/ front=ajax.aspnetcdn.com

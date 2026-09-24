@@ -1,4 +1,4 @@
-# bridges.d\ — bridge configs, activated AUTOMATICALLY when needed
+bridges.d\ — bridge config, activated AUTOMATICALLY when needed
 ==================================================================
 
 You don't need to touch this folder by hand anymore. A scheduled task
@@ -27,25 +27,19 @@ it on and restarting the service by itself.
 Supported Transports (v2.0)
 ============================
 
-This project supports all major Tor pluggable transports:
+This project supports three pluggable transports:
 
 1. **obfs4** — Scrambles Tor traffic to look like random noise.
-   Most widely used, good general-purpose transport.
+   - Most widely used, good general-purpose transport.
 
 2. **webtunnel** — Makes Tor traffic look like regular HTTPS traffic.
-   Effective against DPI that blocks obfs4.
+   - Effective against DPI that blocks obfs4.
 
 3. **Snowflake** (v2.0) — Uses WebRTC to connect through volunteer browser proxies.
-   Best when brokers are not blocked. More info: https://snowflake.torproject.org/
-
-4. **Meek** (v2.0) — Uses domain fronting to make connections appear to go to
-   popular CDN domains (Azure, Amazon, Google). Effective against IP-based blocking.
-
-5. **Conjure** (v2.0) — Uses phantom IP addresses to circumvent censorship.
-   Makes connections appear to go to random IP addresses that are not blocked.
+   - Best when brokers are not blocked. More info: https://snowflake.torproject.org/
 
 The watchdog prioritizes bridges in this order:
-  obfs4 first → webtunnel next → snowflake → meek → conjure last
+  obfs4 first → webtunnel next → snowflake last
 
 This ordering balances reliability with circumvention capability.
 
@@ -70,24 +64,10 @@ For WebTunnel:
 
     Bridge webtunnel <ip>:<port> <fingerprint> url=<url> ver=<ver>
 
-For Meek:
-
-    UseBridges 1
-    ClientTransportPlugin meek_lite exec PluggableTransports\meek-client.exe
-
-    Bridge meek_lite <ip>:<port> <fingerprint> url=<url> front=<front-domain>
-
-For Conjure:
-
-    UseBridges 1
-    ClientTransportPlugin conjure exec PluggableTransports\conjure-client.exe
-
-    Bridge conjure <ip>:<port> <fingerprint> url=<url>
-
 Bridge lines age out (relays get blocked/rotated) - get fresh ones from
 https://bridges.torproject.org/ or a trusted contact periodically, and
-replace the appropriate .conf.sample so the watchdog has something
-current to fall back on next time it's needed.
+replace mordad-bridges.conf.sample (or whichever .sample is stale) so the
+watchdog has something current to fall back on next time it's needed.
 
 A filled-in example (this project's own bridges, as of Aug 2026) ships as
 mordad-bridges.conf.sample right next to this README - it will be
