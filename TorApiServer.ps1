@@ -1,11 +1,11 @@
 #Requires -Version 5.1
 <#
-  TorApiServer.ps1 — v2.0 WebSocket API for Tor SOCKS Proxy
+  TorApiServer.ps1 - v2.0 WebSocket API for Tor SOCKS Proxy
 
   Provides real-time monitoring and control of Tor via WebSocket.
   Connects to Tor's ControlPort (9051) and exposes:
-    - GET /ws  — WebSocket: live status events + command interface
-    - GET /api/status  — JSON: current Tor status snapshot
+    - GET /ws  - WebSocket: live status events + command interface
+    - GET /api/status  - JSON: current Tor status snapshot
 
   WebSocket JSON protocol (client -> server):
     {"cmd": "status"}                 -> returns current status
@@ -23,7 +23,7 @@
 
 [CmdletBinding()]
 param(
-    [int]$Port = 9052,
+    [int]$ApiPort = 9052,
     [string]$TorControlHost = '127.0.0.1',
     [int]$TorControlPort = 9051,
     [int]$StatusIntervalSeconds = 10
@@ -42,14 +42,14 @@ function Write-ApiLog {
     Add-Content -Path (Join-Path $LogDir 'torapi.log') -Value $line
 }
 
-Write-ApiLog "TorApiServer starting on port $Port..."
+Write-ApiLog "TorApiServer starting on port $ApiPort..."
 
 # ---- HTTP listener ----
 $listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add("http://127.0.0.1:$Port/")
+$listener.Prefixes.Add("http://127.0.0.1:$ApiPort/")
 try {
     $listener.Start()
-    Write-ApiLog "HTTP listener started on http://127.0.0.1:$Port/"
+    Write-ApiLog "HTTP listener started on http://127.0.0.1:$ApiPort/"
 } catch {
     Write-ApiLog "FATAL: Failed to start listener: $($_.Exception.Message)"
     exit 1
@@ -63,15 +63,15 @@ $torStream = $null
 
 function Connect-TorControl {
     param(
-        [string]$Host = '127.0.0.1',
-        [int]$Port = 9051
+        [string]$HostName = '127.0.0.1',
+        [int]$ControlPort = 9051
     )
     try {
         if ($torTcp) {
-            try { $torTcp.Close() } catch {}
+            try { $torTcp.Close() } catch { Write-ApiLog "Close failed: $($_.Exception.Message)" }
         }
         $torTcp = New-Object System.Net.Sockets.TcpClient
-        $torTcp.Connect($Host, $Port)
+        $torTcp.Connect($HostName, $ControlPort)
         $torStream = $torTcp.GetStream()
         $torReader = New-Object System.IO.StreamReader($torStream)
         $torWriter = New-Object System.IO.StreamWriter($torStream)
@@ -109,7 +109,7 @@ function Send-TorCommand {
     param([string]$Command)
     try {
         if (-not $torTcp -or -not $torTcp.Connected) {
-            if (-not (Connect-TorControl -Host $TorControlHost -Port $TorControlPort)) {
+            if (-not (Connect-TorControl -HostName $TorControlHost -ControlPort $TorControlPort)) {
                 return @{ success = $false; error = 'not_connected' }
             }
         }
@@ -136,8 +136,6 @@ function Get-TorStatus {
         $version = Send-TorCommand 'GETINFO version'
         $traffic = Send-TorCommand 'GETINFO traffic/read traffic/written'
         $uptime  = Send-TorCommand 'GETINFO uptime'
-        $circuit = Send-TorCommand 'GETINFO circuit-status'
-        $info    = Send-TorCommand 'GETINFO ns/all'
 
         # Parse version
         $ver = if ($version.success -and $version.data) {
@@ -163,14 +161,14 @@ function Get-TorStatus {
 
         # Get tor process info
         $torProc = Get-Process -Name 'tor' -ErrorAction SilentlyContinue
-        $running = $torProc -ne $null
-        $pid = if ($torProc) { $torProc.Id } else { 0 }
+        $running = $null -ne $torProc
+        $procPid = if ($torProc) { $torProc.Id } else { 0 }
         $mem = if ($torProc) { [math]::Round($torProc.WorkingSet64 / 1MB, 2) } else { 0 }
 
         return @{
             timestamp   = (Get-Date).ToString('o')
             running     = $running
-            pid         = $pid
+            pid         = $procPid
             version     = $ver
             uptime      = $up
             memMB       = $mem
@@ -184,7 +182,7 @@ function Get-TorStatus {
 }
 
 # ---- WebSocket handler ----
-$webSocketClients = [System.Collections.Concurrent.ConcurrentDictionary[System.Guid, System.Net.WebSockets.WebSockets]]::new()
+$webSocketClients = [System.Collections.Concurrent.ConcurrentDictionary[System.Guid, System.Net.WebSockets.WebSocket]]::new()
 $cts = New-Object System.Threading.CancellationTokenSource
 
 function Send-WebSocketMessage {
@@ -232,9 +230,9 @@ $pushTimer.Add_Elapsed({
             $badClients += $kvp.Key
         }
     }
-    foreach ($id in $badClients) {
+    foreach ($clientId in $badClients) {
         $s = $null
-        $webSocketClients.TryRemove($id, [ref]$s) | Out-Null
+        $webSocketClients.TryRemove($clientId, [ref]$s) | Out-Null
     }
 })
 $pushTimer.Start()
@@ -303,7 +301,7 @@ while ($listener.IsListening) {
                         }
                     } catch {
                         $err = @{ type = 'error'; data = "parse_error: $($_.Exception.Message)" } | ConvertTo-Json -Compress
-                        try { Send-WebSocketMessage -Socket $ws -Message $err -Token $cts.Token } catch {}
+                        try { Send-WebSocketMessage -Socket $ws -Message $err -Token $cts.Token } catch { Write-ApiLog "Send error failed: $($_.Exception.Message)" }
                     }
                 }
             } finally {
@@ -329,23 +327,17 @@ while ($listener.IsListening) {
             $response.ContentLength64 = $buffer.Length
             $response.OutputStream.Write($buffer, 0, $buffer.Length)
         } elseif ($request.Url.LocalPath -eq '/') {
-            $html = @"
-<!DOCTYPE html>
-<html><head><title>Tor API</title></head>
-<body>
-<h1>Tor SOCKS Proxy API</h1>
-<p>WebSocket endpoint: <code>ws://127.0.0.1:$Port/ws</code></p>
-<p>REST endpoint: <code>GET /api/status</code></p>
-<h2>WebSocket Commands</h2>
-<ul>
-<li><code>{"cmd":"status"}</code> — Get current Tor status</li>
-<li><code>{"cmd":"restart"}</code> — Restart Tor service</li>
-<li><code>{"cmd":"newnym"}</code> — Request new identity</li>
-<li><code>{"cmd":"circuit"}</code> — Get circuit info</li>
-<li><code>{"cmd":"log","tail":50}</code> — Get last N log lines</li>
-</ul>
-</body></html>
-"@
+            $html = "<!DOCTYPE html><html><head><title>Tor API</title></head><body>"
+            $html += "<h1>Tor SOCKS Proxy API</h1>"
+            $html += "<p>WebSocket endpoint: <code>ws://127.0.0.1:$ApiPort/ws</code></p>"
+            $html += "<p>REST endpoint: <code>GET /api/status</code></p>"
+            $html += "<h2>WebSocket Commands</h2><ul>"
+            $html += "<li><code>{""cmd:""status""}</code> - Get current Tor status</li>"
+            $html += "<li><code>{""cmd:""restart""}</code> - Restart Tor service</li>"
+            $html += "<li><code>{""cmd:""newnym""}</code> - Request new identity</li>"
+            $html += "<li><code>{""cmd:""circuit""}</code> - Get circuit info</li>"
+            $html += "<li><code>{""cmd:""log"",""tail"":50}</code> - Get last N log lines</li>"
+            $html += "</ul></body></html>"
             $buffer = [System.Text.Encoding]::UTF8.GetBytes($html)
             $response.ContentType = 'text/html'
             $response.ContentLength64 = $buffer.Length

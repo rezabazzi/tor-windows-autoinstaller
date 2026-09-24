@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 <#
-  TorApiClient.ps1 — Example WebSocket client for Tor SOCKS Proxy API
+  TorApiClient.ps1 - Example WebSocket client for Tor SOCKS Proxy API
 
   Demonstrates connecting to the WebSocket API and interacting with Tor.
   Run this after installing the v2.0+ installer.
@@ -79,63 +79,29 @@ if ($Command -eq 'interactive') {
     Write-Host "Commands: status, newnym, restart, circuit, log, quit"
     Write-Host ""
 
-    # Start a background job to receive messages
-    $receiveScript = {
-        param($ws, $token)
-        try {
-            while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                $msg = Receive-ApiMessage -Socket $ws -Token $token
-                if ($null -eq $msg) { break }
-                $parsed = $msg | ConvertFrom-Json
-                $timestamp = Get-Date -Format 'HH:mm:ss'
-                switch ($parsed.type) {
-                    'status' {
-                        $d = $parsed.data
-                        Write-Host "[$timestamp] " -NoNewline -ForegroundColor DarkGray
-                        Write-Host "STATUS " -NoNewline -ForegroundColor Green
-                        Write-Host "running=$($running) pid=$($d.pid) uptime=$($d.uptime)s mem=$($d.memMB)MB"
-                    }
-                    'log' {
-                        Write-Host "[$timestamp] " -NoNewline -ForegroundColor DarkGray
-                        Write-Host "LOG " -NoNewline -ForegroundColor Cyan
-                        Write-Host $parsed.data
-                    }
-                    'error' {
-                        Write-Host "[$timestamp] " -NoNewline -ForegroundColor DarkGray
-                        Write-Host "ERROR " -NoNewline -ForegroundColor Red
-                        Write-Host $parsed.data
-                    }
-                    default {
-                        Write-Host "[$timestamp] $($parsed.type): $($parsed.data | ConvertTo-Json -Compress)"
-                    }
-                }
-            }
-        } catch {}
-    }
-
     # Send initial status request
     Send-ApiCommand -Socket $ws -Token $token -Command 'status'
     Send-ApiCommand -Socket $ws -Token $token -Command 'log' -Params @{ tail = 10 }
 
     while ($true) {
-        $input = Read-Host "tor> "
-        if ($input -eq 'quit' -or $input -eq 'exit') { break }
-        if ($input -eq 'status') {
+        $userInput = Read-Host "tor>"
+        if ($userInput -eq 'quit' -or $userInput -eq 'exit') { break }
+        if ($userInput -eq 'status') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'status'
-        } elseif ($input -eq 'newnym') {
+        } elseif ($userInput -eq 'newnym') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'newnym'
-        } elseif ($input -eq 'restart') {
+        } elseif ($userInput -eq 'restart') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'restart'
-        } elseif ($input -eq 'circuit') {
+        } elseif ($userInput -eq 'circuit') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'circuit'
-        } elseif ($input -eq 'log') {
+        } elseif ($userInput -eq 'log') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'log' -Params @{ tail = $Tail }
-        } elseif ($input -match '^log\s+(\d+)') {
+        } elseif ($userInput -match '^log\s+(\d+)') {
             Send-ApiCommand -Socket $ws -Token $token -Command 'log' -Params @{ tail = [int]$matches[1] }
-        } elseif ($input -eq 'help') {
+        } elseif ($userInput -eq 'help') {
             Write-Host "Commands: status, newnym, restart, circuit, log [N], quit"
         } else {
-            Write-Host "Unknown command: $input (try 'help')"
+            Write-Host "Unknown command: $userInput (try 'help')"
         }
         Start-Sleep -Milliseconds 500
     }
