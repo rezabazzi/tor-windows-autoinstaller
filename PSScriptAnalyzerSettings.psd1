@@ -1,6 +1,6 @@
 @{
     # Enforced at Error AND Warning severity in CI (see .github/workflows/powershell-lint.yml).
-    # The two exclusions below are deliberate, not oversights - see CONTRIBUTING.md
+    # The exclusions below are deliberate, not oversights - see CONTRIBUTING.md
     # "Lint rule exceptions" for the reasoning behind each one.
     ExcludeRules = @(
         # PSAvoidUsingWriteHost: this project's scripts are run interactively by
@@ -14,6 +14,17 @@
         # Watchdog-TorAutoBridge.ps1 for its verb. It's a private, internal
         # helper that persists the watchdog's own tracking file - not a public
         # cmdlet a user would run with -WhatIf/-Confirm expectations.
-        'PSUseShouldProcessForStateChangingFunctions'
+        'PSUseShouldProcessForStateChangingFunctions',
+
+        # PSUseDeclaredVarsMoreThanAssignments: the WebSocket API server
+        # (TorApiServer.ps1) shares state across functions via script-scoped
+        # variables ($torTcp, $torReader, $torWriter, $torStream) that are
+        # assigned in one function and read in another. This is a legitimate
+        # pattern for a long-running service script.
+        'PSUseDeclaredVarsMoreThanAssignments',
+
+        # PSUseUsingScopeModifierInNewRunspaces: not applicable - this project
+        # does not use runspaces or background jobs.
+        # (Listed for documentation; not currently excluded as it doesn't fire)
     )
 }

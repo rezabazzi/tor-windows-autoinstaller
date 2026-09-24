@@ -18,6 +18,8 @@
   a silent double-click won't look like "nothing happened" - if the window
   closes immediately, the log file will still have a record of whatever
   did or didn't run.
+
+  v2.0: Added snowflake-client.exe support and WebSocket API service.
 #>
 
 [CmdletBinding()]
@@ -35,12 +37,15 @@ $AppDir     = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Nssm       = Join-Path $AppDir 'nssm.exe'
 $TorExe     = Join-Path $AppDir 'tor.exe'
 $Torrc      = Join-Path $AppDir 'torrc'
-$PtExe      = Join-Path $AppDir 'PluggableTransports\lyrebird.exe'
+$PtDir      = Join-Path $AppDir 'PluggableTransports'
+$PtLyrebird = Join-Path $PtDir 'lyrebird.exe'
+$PtSnowflake = Join-Path $PtDir 'snowflake-client.exe'
 $LogDir     = Join-Path $AppDir 'logs'
 $LogFile    = Join-Path $LogDir 'install.log'
 $NoticeLog  = Join-Path $LogDir 'tor-notice.log'
 $SvcName    = 'TorService'
 $FwRuleName = 'Tor SOCKS Proxy'
+$ApiService = Join-Path $AppDir 'TorApiServer.exe'
 
 if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Path $LogDir -Force | Out-Null }
 
@@ -72,7 +77,7 @@ Write-InstallLog "AppDir=$AppDir"
 
 # ---- Sanity checks: fail loudly, not silently ----
 $missing = @()
-foreach ($f in @(@{Path=$Nssm;Name='nssm.exe'}, @{Path=$TorExe;Name='tor.exe'}, @{Path=$Torrc;Name='torrc'}, @{Path=$PtExe;Name='PluggableTransports\lyrebird.exe'})) {
+foreach ($f in @(@{Path=$Nssm;Name='nssm.exe'}, @{Path=$TorExe;Name='tor.exe'}, @{Path=$Torrc;Name='torrc'})) {
     if (-not (Test-Path $f.Path)) { $missing += $f.Name }
 }
 if ($missing.Count -gt 0) {
@@ -83,10 +88,21 @@ if ($missing.Count -gt 0) {
     Exit-Script -Code 1 -Silent:$Silent
 }
 
+# Check pluggable transports (at least one PT must exist for bridges)
+$ptExists = (Test-Path $PtLyrebird) -or (Test-Path $PtSnowflake)
+if (-not $ptExists) {
+    Write-InstallLog "WARNING: No pluggable transport found (lyrebird.exe or snowflake-client.exe). Direct connection only - bridges will not work."
+} else {
+    $pts = @()
+    if (Test-Path $PtLyrebird) { $pts += 'lyrebird.exe (obfs4/webtunnel)' }
+    if (Test-Path $PtSnowflake) { $pts += 'snowflake-client.exe' }
+    Write-InstallLog "Pluggable transports available: $($pts -join ', ')"
+}
+
 # ---- Zero-byte / stubbed-file check (AV quarantine often leaves a 0-byte
 #      or truncated file behind instead of deleting it outright) ----
 $corrupt = @()
-foreach ($f in @(@{Path=$Nssm;Name='nssm.exe'}, @{Path=$TorExe;Name='tor.exe'}, @{Path=$PtExe;Name='lyrebird.exe'})) {
+foreach ($f in @(@{Path=$Nssm;Name='nssm.exe'}, @{Path=$TorExe;Name='tor.exe'}, @{Path=$PtLyrebird;Name='lyrebird.exe'}, @{Path=$PtSnowflake;Name='snowflake-client.exe'})) {
     $item = Get-Item $f.Path -ErrorAction SilentlyContinue
     if ($item -and $item.Length -eq 0) { $corrupt += $f.Name }
 }
@@ -142,7 +158,7 @@ if ($svc) {
 Write-InstallLog "Applying service configuration..."
 & $Nssm set $SvcName AppDirectory $AppDir                                          *>> $LogFile
 & $Nssm set $SvcName DisplayName 'Tor SOCKS Proxy'                                 *>> $LogFile
-& $Nssm set $SvcName Description 'Tor SOCKS5 proxy (auto-installed, port 9050)'     *>> $LogFile
+& $Nssm set $SvcName Description 'Tor SOCKS5 proxy v2.0 (auto-installed, port 9050)' *>> $LogFile
 & $Nssm set $SvcName Start SERVICE_AUTO_START                                       *>> $LogFile
 & $Nssm set $SvcName AppStdout (Join-Path $LogDir 'service-stdout.log')             *>> $LogFile
 & $Nssm set $SvcName AppStderr (Join-Path $LogDir 'service-stderr.log')             *>> $LogFile
@@ -188,13 +204,56 @@ try {
     Write-InstallLog "WARNING: could not register TorAutoBridge-Watchdog scheduled task: $($_.Exception.Message). Bridges will still work if you activate a bridges.d\*.conf manually - they just won't be switched on automatically."
 }
 
-# ---- Start the service ----
+# ---- Install and start the WebSocket API server (v2.0) ----
+# The API server provides real-time monitoring and control via WebSocket.
+# It connects to Tor's ControlPort (9051) and exposes status/commands on port 9052.
+Write-InstallLog "Checking for WebSocket API server..."
+if (Test-Path $ApiService) {
+    Write-InstallLog "TorApiServer.exe found - registering as a service..."
+    $apiSvcName = 'TorApiService'
+    $apiSvc = Get-Service -Name $apiSvcName -ErrorAction SilentlyContinue
+    if (-not $apiSvc) {
+        $apiOut = & $Nssm install $apiSvcName $ApiService '-appdirectory' $AppDir 2>&1
+        $apiOut | Add-Content -Path $LogFile
+        if ($LASTEXITCODE -ne 0) {
+            Write-InstallLog "WARNING: TorApiService install failed with code $LASTEXITCODE"
+        } else {
+            & $Nssm set $apiSvcName DisplayName 'Tor API Service' *>> $LogFile
+            & $Nssm set $apiSvcName Description 'Tor WebSocket API server (port 9052)' *>> $LogFile
+            & $Nssm set $apiSvcName Start SERVICE_AUTO_START *>> $LogFile
+            & $Nssm set $apiSvcName AppStdout (Join-Path $LogDir 'torapi-stdout.log') *>> $LogFile
+            & $Nssm set $apiSvcName AppStderr (Join-Path $LogDir 'torapi-stderr.log') *>> $LogFile
+            & $Nssm set $apiSvcName AppExit Default Restart *>> $LogFile
+            Write-InstallLog "TorApiService registered via NSSM."
+        }
+    } else {
+        Write-InstallLog "TorApiService already exists."
+    }
+} else {
+    Write-InstallLog "TorApiServer.exe not found - skipping WebSocket API service setup."
+}
+
+# ---- Start the services ----
 
 Write-InstallLog "Starting $SvcName..."
 try {
     & $Nssm start $SvcName *>> $LogFile
 } catch {
     Write-InstallLog "nssm start threw: $($_.Exception.Message) (continuing to real health check anyway)"
+}
+
+# Start API server if present
+if (Test-Path $ApiService) {
+    Write-InstallLog "Starting TorApiService..."
+    try {
+        $apiRunning = Get-Service -Name 'TorApiService' -ErrorAction SilentlyContinue
+        if ($apiRunning) {
+            & $Nssm start 'TorApiService' *>> $LogFile
+            Write-InstallLog "TorApiService start requested."
+        }
+    } catch {
+        Write-InstallLog "WARNING: TorApiService start failed: $($_.Exception.Message)"
+    }
 }
 
 # ---- REAL health check: NSSM's own wrapper process comes up almost
