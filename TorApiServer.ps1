@@ -3,20 +3,7 @@
   TorApiServer.ps1 - v2.0 WebSocket API for Tor SOCKS Proxy
 
   Provides real-time monitoring and control of Tor via WebSocket.
-  Connects to Tor's ControlPort (9051) and exposes:
-    - GET /ws  - WebSocket: live status events + command interface
-    - GET /api/status  - JSON: current Tor status snapshot
-
-  WebSocket JSON protocol (client -> server):
-    {"cmd": "status"}                 -> returns current status
-    {"cmd": "restart"}                -> restart Tor service
-    {"cmd": "circuit"}                -> circuit info
-    {"cmd": "newnym"}                 -> request new identity
-    {"cmd": "log", "tail": 50}        -> last N lines of notice log
-
-  WebSocket JSON protocol (server -> client):
-    {"type": "status", "data": {...}} -> periodic status push
-    {"type": "log", "data": "..."}    -> log line events
+  Uses raw TcpListener to avoid .NET Framework WebSocket extension method issues.
 
   Runs as a service via NSSM (registered by Setup-TorService.ps1).
 #>
@@ -30,6 +17,7 @@ param(
 )
 
 $ErrorActionPreference = 'Continue'
+
 $AppDir    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $LogDir    = Join-Path $AppDir 'logs'
 $NoticeLog = Join-Path $LogDir 'tor-notice.log'
@@ -44,15 +32,162 @@ function Write-ApiLog {
 
 Write-ApiLog "TorApiServer starting on port $ApiPort..."
 
-# ---- HTTP listener ----
-$listener = New-Object System.Net.HttpListener
-$listener.Prefixes.Add("http://127.0.0.1:$ApiPort/")
-try {
-    $listener.Start()
-    Write-ApiLog "HTTP listener started on http://127.0.0.1:$ApiPort/"
-} catch {
-    Write-ApiLog "FATAL: Failed to start listener: $($_.Exception.Message)"
-    exit 1
+# ---- WebSocket helpers (manual implementation for PS 5.1 compat) ----
+function Get-WebSocketHandshakeResponse {
+    param([string]$SecWebSocketKey)
+    $magic = '258EAFA5-E914-47DA-95CA-C5AB0DC85B11'
+    $hash = [System.Security.Cryptography.SHA1]::Create().ComputeHash(
+        [System.Text.Encoding]::UTF8.GetBytes($SecWebSocketKey + $magic)
+    )
+    return [Convert]::ToBase64String($hash)
+}
+
+function Read-WebSocketFrame {
+    param(
+        [System.IO.Stream]$Stream,
+        [int]$TimeoutMs = 5000
+    )
+    try {
+        $header = New-Object byte[] 2
+        $read = $Stream.Read($header, 0, 2)
+        if ($read -lt 2) { return $null }
+
+        $fin = ($header[0] -band 0x80) -ne 0
+        $opcode = $header[0] -band 0x0F
+        $masked = ($header[1] -band 0x80) -ne 0
+        $len = $header[1] -band 0x7F
+
+        if ($len -eq 126) {
+            $ext = New-Object byte[] 2
+            $Stream.Read($ext, 0, 2) | Out-Null
+            $len = [BitConverter]::ToUInt16($ext, 0)
+        } elseif ($len -eq 127) {
+            $ext = New-Object byte[] 8
+            $Stream.Read($ext, 0, 8) | Out-Null
+            $len = [BitConverter]::ToUInt64($ext, 0)
+        }
+
+        $mask = $null
+        if ($masked) {
+            $mask = New-Object byte[] 4
+            $Stream.Read($mask, 0, 4) | Out-Null
+        }
+
+        if ($len -gt 1MB) { return $null }
+
+        $data = New-Object byte[] $len
+        $total = 0
+        while ($total -lt $len) {
+            $r = $Stream.Read($data, $total, $len - $total)
+            if ($r -eq 0) { return $null }
+            $total += $r
+        }
+
+        if ($masked) {
+            for ($i = 0; $i -lt $len; $i++) {
+                $data[$i] = $data[$i] -bxor $mask[$i % 4]
+            }
+        }
+
+        return @{
+            Opcode = $opcode
+            Data = $data
+            Close = ($opcode -eq 0x08)
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Write-WebSocketFrame {
+    param(
+        [System.IO.Stream]$Stream,
+        [string]$Message
+    )
+    $data = [System.Text.Encoding]::UTF8.GetBytes($Message)
+    $len = $data.Length
+
+    if ($len -lt 126) {
+        $frame = New-Object byte[] (2 + $len)
+        $frame[0] = 0x81  # FIN + TEXT
+        $frame[1] = $len
+        [Array]::Copy($data, 0, $frame, 2, $len)
+    } else {
+        $frame = New-Object byte[] (4 + $len)
+        $frame[0] = 0x81
+        $frame[1] = 126
+        $frame[2] = ($len -shr 8) -band 0xFF
+        $frame[3] = $len -band 0xFF
+        [Array]::Copy($data, 0, $frame, 4, $len)
+    }
+
+    $Stream.Write($frame, 0, $frame.Length)
+    $Stream.Flush()
+}
+
+# ---- HTTP request parser (minimal) ----
+function Get-HttpRequest {
+    param([System.IO.Stream]$Stream)
+
+    $buffer = New-Object byte[] 4096
+    $sb = New-Object System.Text.StringBuilder
+    $headerEnd = [System.Text.Encoding]::UTF8.GetBytes("`r`n`r`n")
+
+    while ($true) {
+        $read = $Stream.Read($buffer, 0, 4096)
+        if ($read -eq 0) { return $null }
+        $sb.Append([System.Text.Encoding]::UTF8.GetString($buffer, 0, $read)) | Out-Null
+        $content = $sb.ToString()
+        $hdrEnd = $content.IndexOf("`r`n`r`n")
+        if ($hdrEnd -ge 0) {
+            $headers = $content.Substring(0, $hdrEnd)
+            $lines = $headers -split "`r`n"
+            $requestLine = $lines[0]
+            $parts = $requestLine -split ' '
+            if ($parts.Count -lt 2) { return $null }
+
+            $result = @{
+                Method = $parts[0]
+                Path = $parts[1]
+                Headers = @{}
+                WebSocketKey = $null
+            }
+
+            for ($i = 1; $i -lt $lines.Count; $i++) {
+                $line = $lines[$i]
+                if ($line -match '^([^:]+):\s*(.+)$') {
+                    $result.Headers[$matches[1].Trim()] = $matches[2].Trim()
+                }
+            }
+
+            if ($result.Headers.ContainsKey('Sec-WebSocket-Key')) {
+                $result.WebSocketKey = $result.Headers['Sec-WebSocket-Key']
+            }
+
+            return $result
+        }
+    }
+}
+
+function Send-HttpResponse {
+    param(
+        [System.IO.Stream]$Stream,
+        [int]$StatusCode,
+        [string]$ContentType,
+        [byte[]]$Body
+    )
+    $statusText = switch ($StatusCode) {
+        200 { 'OK' }
+        404 { 'Not Found' }
+        default { 'Error' }
+    }
+    $headers = "HTTP/1.1 $StatusCode $statustext`r`nContent-Type: $contentType`r`nContent-Length: $($body.Length)`r`nConnection: close`r`n`r`n"
+    $hdr = [System.Text.Encoding]::UTF8.GetBytes($headers)
+    $Stream.Write($hdr, 0, $hdr.Length)
+    if ($body.Length -gt 0) {
+        $Stream.Write($Body, 0, $Body.Length)
+    }
+    $Stream.Flush()
 }
 
 # ---- Tor control connection ----
@@ -83,7 +218,6 @@ function Connect-TorControl {
         # Authenticate with cookie
         $cookiePath = Join-Path $AppDir 'control_auth_cookie'
         if (-not (Test-Path $cookiePath)) {
-            # Try alternate location
             $cookiePath = (Get-ChildItem -Path $AppDir -Filter 'control_auth_cookie' -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1).FullName
         }
         if ($cookiePath -and (Test-Path $cookiePath)) {
@@ -132,19 +266,16 @@ function Send-TorCommand {
 
 function Get-TorStatus {
     try {
-        # Get various info
         $version = Send-TorCommand 'GETINFO version'
         $traffic = Send-TorCommand 'GETINFO traffic/read traffic/written'
         $uptime  = Send-TorCommand 'GETINFO uptime'
 
-        # Parse version
         $ver = if ($version.success -and $version.data) {
             ($version.data | Where-Object { $_ -match 'version=' } | ForEach-Object {
                 if ($_ -match 'version="?([^"\s]+)"?') { $matches[1] } else { $_ }
             }) -join ' '
         } else { 'unknown' }
 
-        # Parse traffic
         $read = 0; $written = 0
         if ($traffic.success) {
             foreach ($l in $traffic.data) {
@@ -153,13 +284,11 @@ function Get-TorStatus {
             }
         }
 
-        # Parse uptime
         $up = 0
         if ($uptime.success -and $uptime.data -match 'uptime=(\d+)') {
             $up = [long]$matches[1]
         }
 
-        # Get tor process info
         $torProc = Get-Process -Name 'tor' -ErrorAction SilentlyContinue
         $running = $null -ne $torProc
         $procPid = if ($torProc) { $torProc.Id } else { 0 }
@@ -181,34 +310,9 @@ function Get-TorStatus {
     }
 }
 
-# ---- WebSocket handler ----
-$webSocketClients = [System.Collections.Concurrent.ConcurrentDictionary[System.Guid, System.Net.WebSockets.WebSocket]]::new()
+# ---- WebSocket clients ----
+$webSocketClients = [System.Collections.Generic.List[System.Net.Sockets.TcpClient]]::new()
 $cts = New-Object System.Threading.CancellationTokenSource
-
-function Send-WebSocketMessage {
-    param(
-        [System.Net.WebSockets.WebSocket]$Socket,
-        [string]$Message,
-        [System.Threading.CancellationToken]$Token
-    )
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($Message)
-    $segment = New-Object System.ArraySegment[byte] -ArgumentList @(,$bytes)
-    $Socket.SendAsync($segment, [System.Net.WebSockets.WebSocketMessageType]::Text, $true, $Token).Wait()
-}
-
-function Receive-WebSocketMessage {
-    param(
-        [System.Net.WebSockets.WebSocket]$Socket,
-        [System.Threading.CancellationToken]$Token
-    )
-    $buffer = New-Object byte[] 4096
-    $segment = New-Object System.ArraySegment[byte] -ArgumentList @(,$buffer)
-    $result = $Socket.ReceiveAsync($segment, $Token).Result
-    if ($result.MessageType -eq [System.Net.WebSockets.WebSocketMessageType]::Close) {
-        return $null
-    }
-    return [System.Text.Encoding]::UTF8.GetString($buffer, 0, $result.Count)
-}
 
 # Status push loop
 $pushTimer = New-Object System.Timers.Timer
@@ -216,57 +320,74 @@ $pushTimer.Interval = $StatusIntervalSeconds * 1000
 $pushTimer.AutoReset = $true
 $pushTimer.Add_Elapsed({
     $status = Get-TorStatus
-    # Check bootstrap
     if (Test-Path $NoticeLog) {
         $lastLine = Get-Content $NoticeLog -Tail 1 -ErrorAction SilentlyContinue
         if ($lastLine -match 'Bootstrapped 100%') { $status.bootstrapped = $true }
     }
     $json = @{ type = 'status'; data = $status } | ConvertTo-Json -Compress
     $badClients = @()
-    foreach ($kvp in $webSocketClients) {
+    foreach ($client in $webSocketClients) {
         try {
-            Send-WebSocketMessage -Socket $kvp.Value -Message $json -Token $cts.Token
+            if ($client.Connected) {
+                Write-WebSocketFrame -Stream $client.GetStream() -Message $json
+            } else {
+                $badClients.Add($client)
+            }
         } catch {
-            $badClients += $kvp.Key
+            $badClients.Add($client)
         }
     }
-    foreach ($clientId in $badClients) {
-        $s = $null
-        $webSocketClients.TryRemove($clientId, [ref]$s) | Out-Null
+    foreach ($c in $badClients) {
+        $webSocketClients.Remove($c) | Out-Null
+        try { $c.Close() } catch {}
     }
 })
 $pushTimer.Start()
 
 Write-ApiLog "Status push timer started (${StatusIntervalSeconds}s interval)"
 
-# ---- Main HTTP loop ----
-while ($listener.IsListening) {
+# ---- Main TCP listener ----
+$listener = New-Object System.Net.Sockets.TcpListener([System.Net.IPAddress]::Loopback, $ApiPort)
+$listener.Start()
+Write-ApiLog "TCP listener started on 127.0.0.1:$ApiPort"
+
+while ($true) {
     try {
-        $context = $listener.GetContext()
-        $request = $context.Request
-        $response = $context.Response
+        $client = $listener.AcceptTcpClient()
+        $stream = $client.GetStream()
+
+        $request = Get-HttpRequest -Stream $stream
+        if ($null -eq $request) { $client.Close(); continue }
 
         # WebSocket upgrade
-        if ($request.IsWebSocketRequest) {
-            $wsContext = $context.AcceptWebSocketRequest($null)
-            $ws = $wsContext.WebSocket
-            $clientId = [System.Guid]::NewGuid()
-            $webSocketClients.TryAdd($clientId, $ws) | Out-Null
+        if ($request.WebSocketKey) {
+            $accept = Get-WebSocketHandshakeResponse -SecWebSocketKey $request.WebSocketKey
+            $response = "HTTP/1.1 101 Switching Protocols`r`nUpgrade: websocket`r`nConnection: Upgrade`r`nSec-WebSocket-Accept: $accept`r`n`r`n"
+            $hdr = [System.Text.Encoding]::UTF8.GetBytes($response)
+            $stream.Write($hdr, 0, $hdr.Length)
+            $stream.Flush()
 
-            Write-ApiLog "WebSocket client connected: $clientId"
+            $webSocketClients.Add($client) | Out-Null
+            Write-ApiLog "WebSocket client connected"
 
-            try {
-                while ($ws.State -eq [System.Net.WebSockets.WebSocketState]::Open) {
-                    $msg = Receive-WebSocketMessage -Socket $ws -Token $cts.Token
-                    if ($null -eq $msg) { break }
+            # Handle client in background
+            $clientcts = New-Object System.Threading.CancellationTokenSource
+            $clientTask = {
+                param($cli, $cts2)
+                $s = $cli.GetStream()
+                while ($cli.Connected -and -not $cts2.IsCancellationRequested) {
+                    $frame = Read-WebSocketFrame -Stream $s -TimeoutMs 5000
+                    if ($null -eq $frame) { continue }
+                    if ($frame.Close) { break }
 
+                    $msg = [System.Text.Encoding]::UTF8.GetString($frame.Data)
                     try {
                         $cmd = $msg | ConvertFrom-Json
                         switch ($cmd.cmd) {
                             'status' {
                                 $st = Get-TorStatus
                                 $reply = @{ type = 'status'; data = $st } | ConvertTo-Json -Compress
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                             'restart' {
                                 $nssm = Join-Path $AppDir 'nssm.exe'
@@ -276,79 +397,65 @@ while ($listener.IsListening) {
                                 } else {
                                     $reply = @{ type = 'error'; data = 'nssm_not_found' } | ConvertTo-Json -Compress
                                 }
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                             'newnym' {
                                 $res = Send-TorCommand 'SIGNAL NEWNYM'
                                 $reply = @{ type = 'newnym'; data = $res } | ConvertTo-Json -Compress
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                             'circuit' {
                                 $res = Send-TorCommand 'GETINFO circuit-status'
                                 $reply = @{ type = 'circuit'; data = $res.data } | ConvertTo-Json -Compress
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                             'log' {
                                 $tail = if ($cmd.tail) { [int]$cmd.tail } else { 20 }
                                 $lines = if (Test-Path $NoticeLog) { Get-Content $NoticeLog -Tail $tail } else { @() }
                                 $reply = @{ type = 'log'; data = $lines } | ConvertTo-Json -Compress
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                             default {
                                 $reply = @{ type = 'error'; data = "unknown_command: $($cmd.cmd)" } | ConvertTo-Json -Compress
-                                Send-WebSocketMessage -Socket $ws -Message $reply -Token $cts.Token
+                                Write-WebSocketFrame -Stream $s -Message $reply
                             }
                         }
                     } catch {
                         $err = @{ type = 'error'; data = "parse_error: $($_.Exception.Message)" } | ConvertTo-Json -Compress
-                        try { Send-WebSocketMessage -Socket $ws -Message $err -Token $cts.Token } catch { Write-ApiLog "Send error failed: $($_.Exception.Message)" }
+                        try { Write-WebSocketFrame -Stream $s -Message $err } catch {}
                     }
                 }
-            } finally {
-                $webSocketClients.TryRemove($clientId, [ref]$null) | Out-Null
-                Write-ApiLog "WebSocket client disconnected: $clientId"
+                $webSocketClients.Remove($cli) | Out-Null
+                try { $cli.Close() } catch {}
+                Write-ApiLog "WebSocket client disconnected"
             }
+
+            # Run client handler synchronously (simpler, no jobs)
+            & $clientTask $client $clientcts
+
             continue
         }
 
         # REST API
-        $response.Headers.Add('Access-Control-Allow-Origin', '*')
-        $response.Headers.Add('Access-Control-Allow-Methods', 'GET, OPTIONS')
-
-        if ($request.Url.LocalPath -eq '/api/status') {
+        if ($request.Path -eq '/api/status' -or $request.Path -eq '/') {
             $status = Get-TorStatus
             if (Test-Path $NoticeLog) {
                 $lastLines = Get-Content $NoticeLog -Tail 5 -ErrorAction SilentlyContinue
                 if ($lastLines -match 'Bootstrapped 100%') { $status.bootstrapped = $true }
             }
             $json = $status | ConvertTo-Json -Compress
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($json)
-            $response.ContentType = 'application/json'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-        } elseif ($request.Url.LocalPath -eq '/') {
-            $html = "<!DOCTYPE html><html><head><title>Tor API</title></head><body>"
-            $html += "<h1>Tor SOCKS Proxy API</h1>"
-            $html += "<p>WebSocket endpoint: <code>ws://127.0.0.1:$ApiPort/ws</code></p>"
-            $html += "<p>REST endpoint: <code>GET /api/status</code></p>"
-            $html += "<h2>WebSocket Commands</h2><ul>"
-            $html += "<li><code>{""cmd:""status""}</code> - Get current Tor status</li>"
-            $html += "<li><code>{""cmd:""restart""}</code> - Restart Tor service</li>"
-            $html += "<li><code>{""cmd:""newnym""}</code> - Request new identity</li>"
-            $html += "<li><code>{""cmd:""circuit""}</code> - Get circuit info</li>"
-            $html += "<li><code>{""cmd:""log"",""tail"":50}</code> - Get last N log lines</li>"
-            $html += "</ul></body></html>"
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($html)
-            $response.ContentType = 'text/html'
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $body = [System.Text.Encoding]::UTF8.GetBytes($json)
+            Send-HttpResponse -Stream $stream -StatusCode 200 -ContentType 'application/json' -Body $body
+        } elseif ($request.Path -eq '/api/ping') {
+            $json = @{ status = 'ok'; time = (Get-Date).ToString('o') } | ConvertTo-Json -Compress
+            $body = [System.Text.Encoding]::UTF8.GetBytes($json)
+            Send-HttpResponse -Stream $stream -StatusCode 200 -ContentType 'application/json' -Body $body
         } else {
-            $response.StatusCode = 404
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes('{"error":"not_found"}')
-            $response.ContentType = 'application/json'
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
+            $json = @{ error = 'not_found' } | ConvertTo-Json -Compress
+            $body = [System.Text.Encoding]::UTF8.GetBytes($json)
+            Send-HttpResponse -Stream $stream -StatusCode 404 -ContentType 'application/json' -Body $body
         }
-        $response.Close()
+        $client.Close()
     } catch {
         Write-ApiLog "Request handler error: $($_.Exception.Message)"
     }

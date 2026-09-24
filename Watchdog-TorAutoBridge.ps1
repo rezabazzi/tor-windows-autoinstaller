@@ -170,7 +170,8 @@ if (-not $state.BridgesEnabled) {
     if ($sample) {
         $target = Join-Path $BridgesDir ($sample.BaseName)   # strips ".sample"
         $transport = Get-ActiveBridgeTransport
-        Write-WatchdogLog "Direct connection stuck for ~$($FailThreshold * 5) min. Auto-activating bridges: $($sample.Name) -> $(Split-Path -Leaf $target) [transport: $($transport ?? 'unknown')]"
+        $transportDisplay = if ($transport) { $transport } else { 'unknown' }
+        Write-WatchdogLog "Direct connection stuck for ~$($FailThreshold * 5) min. Auto-activating bridges: $($sample.Name) -> $(Split-Path -Leaf $target) [transport: $transportDisplay]"
         Copy-Item -Path $sample.FullName -Destination $target -Force
         try { & $Nssm restart $SvcName *>> $LogFile } catch { Write-WatchdogLog "nssm restart failed: $($_.Exception.Message)" }
 
