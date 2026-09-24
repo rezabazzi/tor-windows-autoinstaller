@@ -2,3 +2,5 @@ Download lyrebird.exe (Windows build) from:
 https://gitlab.torproject.org/tpo/anti-censorship/pluggable-transports/lyrebird
 
 Place lyrebird.exe directly in this folder, then delete this text file.
+
+This is the obfs4/webtunnel pluggable transport client used for circumventing censorship.

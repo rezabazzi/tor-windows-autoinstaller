@@ -1,0 +1,24 @@
+# snowflake-bridges.conf.sample
+#
+# Snowflake pluggable transport bridges for Tor.
+#
+# This is inert as shipped - the ".sample" extension means torrc's
+# %include bridges.d\*.conf glob does NOT pick it up.
+#
+# To activate these exact bridges, rename this file to remove ".sample"
+# (snowflake-bridges.conf) and restart the service:
+#
+#     nssm restart TorService
+#
+# These bridges age out - check they still work (tor-notice.log should
+# show "Bootstrapped 100%" within a minute or two of restart) and replace
+# them from https://bridges.torproject.org/ if not.
+#
+# Snowflake requires a stun-server and front-domain to be reachable.
+# If direct Snowflake brokers fail, try alternative STUN servers
+# (see bridges.torproject.org for current ones).
+
+UseBridges 1
+ClientTransportPlugin snowflake exec PluggableTransports\snowflake-client.exe -log logs/snowflake-client.log
+
+Bridge snowflake 192.0.2.1:443 0123456789ABCDEF0123456789ABCDEF01234567

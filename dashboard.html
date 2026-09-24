@@ -1,0 +1,305 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Tor SOCKS Proxy - Dashboard</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    padding: 20px;
+}
+.container { max-width: 900px; margin: 0 auto; }
+h1 {
+    text-align: center;
+    margin-bottom: 20px;
+    color: #e94560;
+    font-size: 1.8em;
+}
+.card {
+    background: #16213e;
+    border-radius: 12px;
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid #0f3460;
+}
+.card h2 {
+    color: #e94560;
+    margin-bottom: 12px;
+    font-size: 1.1em;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+.status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 12px;
+}
+.status-item {
+    background: #0f3460;
+    border-radius: 8px;
+    padding: 12px;
+    text-align: center;
+}
+.status-item .label {
+    font-size: 0.8em;
+    color: #aaa;
+    margin-bottom: 4px;
+}
+.status-item .value {
+    font-size: 1.3em;
+    font-weight: bold;
+    color: #00d2ff;
+}
+.status-item .value.running { color: #00ff88; }
+.status-item .value.stopped { color: #ff4444; }
+.log-viewer {
+    background: #0a0a15;
+    border-radius: 8px;
+    padding: 12px;
+    max-height: 300px;
+    overflow-y: auto;
+    font-family: 'Courier New', monospace;
+    font-size: 0.85em;
+    line-height: 1.4;
+    border: 1px solid #333;
+}
+.log-line { padding: 2px 0; border-bottom: 1px solid #1a1a1a; }
+.log-line.error { color: #ff4444; }
+.log-line.warn { color: #ffaa00; }
+.log-line.bootstrap { color: #00ff88; }
+.controls {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+.btn {
+    background: #e94560;
+    color: white;
+    border: none;
+    padding: 10px 20px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.95em;
+    font-weight: 500;
+    transition: background 0.2s;
+}
+.btn:hover { background: #ff6b6b; }
+.btn:disabled { background: #555; cursor: not-allowed; }
+.connection-status {
+    text-align: center;
+    padding: 8px;
+    border-radius: 8px;
+    margin-bottom: 16px;
+    font-weight: 500;
+}
+.connection-status.connected { background: #00ff8833; color: #00ff88; }
+.connection-status.disconnected { background: #ff444433; color: #ff4444; }
+</style>
+</head>
+<body>
+<div class="container">
+    <h1>Tor SOCKS Proxy Dashboard</h1>
+
+    <div id="connectionStatus" class="connection-status disconnected">
+        Disconnected — Connecting to ws://127.0.0.1:9052/ws...
+    </div>
+
+    <div class="card">
+        <h2>Status</h2>
+        <div class="status-grid">
+            <div class="status-item">
+                <div class="label">Status</div>
+                <div id="statusRunning" class="value stopped">—</div>
+            </div>
+            <div class="status-item">
+                <div class="label">PID</div>
+                <div id="statusPid" class="value">—</div>
+            </div>
+            <div class="status-item">
+                <div class="label">Version</div>
+                <div id="statusVersion" class="value">—</div>
+            </div>
+            <div class="status-item">
+                <div class="label">Uptime</div>
+                <div id="statusUptime" class="value">—</div>
+            </div>
+            <div class="status-item">
+                <div class="label">Memory</div>
+                <div id="statusMem" class="value">—</div>
+            </div>
+            <div class="status-item">
+                <div class="label">Traffic In/Out</div>
+                <div id="statusTraffic" class="value">—</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Controls</h2>
+        <div class="controls">
+            <button class="btn" onclick="sendCommand('status')">Refresh Status</button>
+            <button class="btn" onclick="sendCommand('newnym')">New Identity</button>
+            <button class="btn" onclick="sendCommand('circuit')">Circuit Info</button>
+            <button class="btn" onclick="sendCommand('restart')">Restart Tor</button>
+            <button class="btn" onclick="loadLogs()">Load Logs</button>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Event Log</h2>
+        <div id="logViewer" class="log-viewer">
+            <div class="log-line">Waiting for connection...</div>
+        </div>
+    </div>
+</div>
+
+<script>
+let ws = null;
+const logViewer = document.getElementById('logViewer');
+const connStatus = document.getElementById('connectionStatus');
+
+function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+function formatUptime(seconds) {
+    if (!seconds || seconds < 0) return '—';
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    const s = seconds % 60;
+    if (h > 0) return `${h}h ${m}m ${s}s`;
+    if (m > 0) return `${m}m ${s}s`;
+    return `${s}s`;
+}
+
+function addLog(message, type = '') {
+    const div = document.createElement('div');
+    div.className = 'log-line ' + type;
+    const time = new Date().toLocaleTimeString();
+    div.textContent = `[${time}] ${message}`;
+    logViewer.appendChild(div);
+    logViewer.scrollTop = logViewer.scrollHeight;
+}
+
+function updateUI(data) {
+    const runningEl = document.getElementById('statusRunning');
+    if (data.running) {
+        runningEl.textContent = 'RUNNING';
+        runningEl.className = 'value running';
+    } else {
+        runningEl.textContent = 'STOPPED';
+        runningEl.className = 'value stopped';
+    }
+    document.getElementById('statusPid').textContent = data.pid || '—';
+    document.getElementById('statusVersion').textContent = data.version || '—';
+    document.getElementById('statusUptime').textContent = formatUptime(data.uptime);
+    document.getElementById('statusMem').textContent = data.memMB ? data.memMB + ' MB' : '—';
+    if (data.bytesRead !== undefined && data.bytesWritten !== undefined) {
+        document.getElementById('statusTraffic').textContent =
+            `${formatBytes(data.bytesRead)} / ${formatBytes(data.bytesWritten)}`;
+    }
+}
+
+function sendCommand(cmd, params = {}) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addLog('Not connected to Tor API', 'error');
+        return;
+    }
+    ws.send(JSON.stringify({ cmd, ...params }));
+}
+
+function loadLogs() {
+    if (!ws || ws.readyState !== WebSocket.OPEN) {
+        addLog('Not connected to Tor API', 'error');
+        return;
+    }
+    ws.send(JSON.stringify({ cmd: 'log', tail: 50 }));
+}
+
+function connect() {
+    const wsUri = 'ws://127.0.0.1:9052/ws';
+    try {
+        ws = new WebSocket(wsUri);
+    } catch (e) {
+        connStatus.textContent = 'Connection failed: ' + e.message;
+        connStatus.className = 'connection-status disconnected';
+        setTimeout(connect, 3000);
+        return;
+    }
+
+    ws.onopen = () => {
+        connStatus.textContent = 'Connected to Tor API';
+        connStatus.className = 'connection-status connected';
+        addLog('Connected to WebSocket API', 'bootstrap');
+        ws.send(JSON.stringify({ cmd: 'status' }));
+        ws.send(JSON.stringify({ cmd: 'log', tail: 20 }));
+    };
+
+    ws.onmessage = (event) => {
+        try {
+            const msg = JSON.parse(event.data);
+            switch (msg.type) {
+                case 'status':
+                    updateUI(msg.data);
+                    break;
+                case 'log':
+                    logViewer.innerHTML = '';
+                    if (Array.isArray(msg.data)) {
+                        msg.data.forEach(line => {
+                            let type = '';
+                            if (line.includes('Bootstrapped 100%')) type = 'bootstrap';
+                            else if (line.includes('ERROR') || line.includes('error')) type = 'error';
+                            else if (line.includes('WARN') || line.includes('warn')) type = 'warn';
+                            addLog(line, type);
+                        });
+                    }
+                    break;
+                case 'circuit':
+                    logViewer.innerHTML = '';
+                    if (Array.isArray(msg.data)) {
+                        msg.data.forEach(line => addLog(line));
+                    }
+                    break;
+                case 'error':
+                    addLog('Error: ' + msg.data, 'error');
+                    break;
+                case 'newnym':
+                    addLog('New identity requested', 'bootstrap');
+                    break;
+                case 'info':
+                    addLog('Info: ' + (typeof msg.data === 'string' ? msg.data : JSON.stringify(msg.data)));
+                    break;
+            }
+        } catch (e) {
+            addLog('Failed to parse message: ' + event.data, 'error');
+        }
+    };
+
+    ws.onclose = () => {
+        connStatus.textContent = 'Disconnected — Reconnecting in 3s...';
+        connStatus.className = 'connection-status disconnected';
+        document.getElementById('statusRunning').textContent = '—';
+        document.getElementById('statusRunning').className = 'value stopped';
+        addLog('Connection closed', 'error');
+        setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => {
+        connStatus.textContent = 'Connection error';
+        connStatus.className = 'connection-status disconnected';
+    };
+}
+
+// Auto-connect on load
+connect();
+</script>
+</body>
+</html>

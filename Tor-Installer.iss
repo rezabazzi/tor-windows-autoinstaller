@@ -5,6 +5,8 @@
 ;  ("TorService"), opens the outbound firewall rule, sets it to auto-start,
 ;  and starts it. No manual steps after running the installer.
 ;
+;  v2.0: Added Snowflake transport support, WebSocket API server.
+;
 ;  BEFORE COMPILING, put these files in a "Source" folder next to this
 ;  script (see the [Files] section below for exact paths):
 ;
@@ -18,6 +20,7 @@
 ;                                             country-based node filtering)
 ;    Source\geoip6                          (OPTIONAL, same folder as geoip)
 ;    Source\PluggableTransports\lyrebird.exe (from the same Expert Bundle)
+;    Source\PluggableTransports\snowflake-client.exe (v2.0: Snowflake transport)
 ;    Source\nssm.exe                        (win64 build, from nssm.cc)
 ;    Source\torrc                           (the torrc generated alongside
 ;                                             this script — bridges are no
@@ -30,6 +33,8 @@
 ;                                             bridges, shipped INERT via the
 ;                                             .sample extension — rename to
 ;                                             .conf on a machine to activate)
+;    Source\bridges.d\snowflake-bridges.conf.sample  (v2.0: Snowflake
+;                                             bridge example — inert by default)
 ;    Setup-TorService.ps1                   (the loggable post-install script —
 ;                                             keep it next to this .iss, NOT in
 ;                                             Source\; it's referenced directly)
@@ -38,7 +43,10 @@
 ;                                             no manual .conf renaming — keep
 ;                                             next to this .iss too, registered
 ;                                             as a Scheduled Task by
-;                                             Setup-TorService.ps1)
+;                                             Setup-TorService.ps1 above)
+;    TorApiServer.ps1                       (v2.0: WebSocket API server —
+;                                             provides real-time monitoring
+;                                             and control via WebSocket)
 ;
 ;  The actual NSSM/firewall/service work happens in Setup-TorService.ps1,
 ;  run via [Run] below through powershell.exe — NOT in Pascal [Code]. Pascal
@@ -61,7 +69,7 @@
 ; ============================================================================
 
 #define MyAppName "Tor SOCKS Proxy"
-#define MyAppVersion "1.0"
+#define MyAppVersion "2.0"
 #define MyServiceName "TorService"
 #define MyInstallDir "C:\Tor"
 
@@ -104,6 +112,7 @@ Source: "Source\geoip6"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoes
 
 ; Pluggable transports (bridges)
 Source: "Source\PluggableTransports\lyrebird.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion
+Source: "Source\PluggableTransports\snowflake-client.exe"; DestDir: "{app}\PluggableTransports"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; NSSM (service wrapper)
 Source: "Source\nssm.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -115,6 +124,7 @@ Source: "Source\torrc"; DestDir: "{app}"; Flags: ignoreversion
 ; Tor connection). See Source\bridges.d\README.txt for the format.
 Source: "Source\bridges.d\README.txt"; DestDir: "{app}\bridges.d"; Flags: ignoreversion
 Source: "Source\bridges.d\mordad-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion
+Source: "Source\bridges.d\snowflake-bridges.conf.sample"; DestDir: "{app}\bridges.d"; Flags: ignoreversion skipifsourcedoesntexist
 
 ; Post-install script — does the actual NSSM/firewall/service work (see header)
 Source: "Setup-TorService.ps1"; DestDir: "{app}"; Flags: ignoreversion
@@ -123,6 +133,9 @@ Source: "Setup-TorService.ps1"; DestDir: "{app}"; Flags: ignoreversion
 ; switches them on, no manual .conf renaming required (registered as a
 ; Scheduled Task by Setup-TorService.ps1 above)
 Source: "Watchdog-TorAutoBridge.ps1"; DestDir: "{app}"; Flags: ignoreversion
+
+; WebSocket API server (v2.0) — provides real-time monitoring and control
+Source: "TorApiServer.ps1"; DestDir: "{app}"; Flags: ignoreversion skipifsourcedoesntexist
 
 [Dirs]
 Name: "{app}\data"
@@ -224,6 +237,12 @@ begin
     begin
       RunHidden(NssmExe, 'stop {#MyServiceName}');
       RunHidden(NssmExe, 'remove {#MyServiceName} confirm');
+    end;
+    // TorApiService (v2.0) — remove if present
+    if ServiceExists('TorApiService') then
+    begin
+      RunHidden(NssmExe, 'stop TorApiService');
+      RunHidden(NssmExe, 'remove TorApiService confirm');
     end;
     if FirewallRuleExists(FirewallRuleName) then
       RunHidden('netsh.exe', 'advfirewall firewall delete rule name="' + FirewallRuleName + '"');

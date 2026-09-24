@@ -18,19 +18,51 @@ at boot) watches C:\Tor\logs\tor-notice.log and decides on its own:
 
 torrc includes this folder automatically via:
 
-    %include C:\Tor\bridges.d\*.conf
+    %include bridges.d/*.conf
 
 So the only thing you ever need to do manually is keep at least one
 current *.conf.sample here as a fallback - the watchdog handles turning
 it on and restarting the service by itself.
 
+Supported Transports (v2.0)
+============================
+
+This project supports three pluggable transports:
+
+1. **obfs4** — Scrambles Tor traffic to look like random noise.
+   - Most widely used, good general-purpose transport.
+
+2. **webtunnel** — Makes Tor traffic look like regular HTTPS traffic.
+   - Effective against DPI that blocks obfs4.
+
+3. **Snowflake** (v2.0) — Uses WebRTC to connect through volunteer browser proxies.
+   - Best when brokers are not blocked. More info: https://snowflake.torproject.org/
+
+The watchdog prioritizes bridges in this order:
+  obfs4 first → webtunnel next → snowflake last
+
+This ordering balances reliability with circumvention capability.
+
 Format for a bridge conf (same whether it's a .sample or already active):
 
     UseBridges 1
-    ClientTransportPlugin webtunnel,obfs4 exec C:\Tor\PluggableTransports\lyrebird.exe
+    ClientTransportPlugin obfs4 exec PluggableTransports\lyrebird.exe
+
+    Bridge obfs4 <ip>:<port> <fingerprint> cert=<cert> iat-mode=<0|1|2>
+
+For Snowflake:
+
+    UseBridges 1
+    ClientTransportPlugin snowflake exec PluggableTransports\snowflake-client.exe -log logs/snowflake-client.log
+
+    Bridge snowflake <ip>:<port> <fingerprint>
+
+For WebTunnel:
+
+    UseBridges 1
+    ClientTransportPlugin webtunnel exec PluggableTransports\lyrebird.exe
 
     Bridge webtunnel <ip>:<port> <fingerprint> url=<url> ver=<ver>
-    Bridge obfs4 <ip>:<port> <fingerprint> cert=<cert> iat-mode=<0|1|2>
 
 Bridge lines age out (relays get blocked/rotated) - get fresh ones from
 https://bridges.torproject.org/ or a trusted contact periodically, and
@@ -46,4 +78,3 @@ Manual override: to force bridges on/off right now instead of waiting for
 the watchdog, activate/remove the .conf yourself and run
 `nssm restart TorService` - the watchdog won't fight you, it only acts
 after ~15 minutes of a stuck bootstrap.
-
